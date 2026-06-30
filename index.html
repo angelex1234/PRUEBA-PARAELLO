@@ -114,7 +114,68 @@ const API_BASE='https://script.google.com/macros/s/AKfycby_2f0hOXpnDsk6HGvPCTov1
 document.addEventListener('DOMContentLoaded',()=>{vinInput.addEventListener('input',()=>vinInput.value=norm(vinInput.value));vinInput.addEventListener('keydown',e=>{if(e.key==='Enter')buscarVin()});bulkInput.addEventListener('input',function(){this.value=this.value.toUpperCase()});probarBackend(false)});
 function mode(m){tabSingle.classList.toggle('active',m==='single');tabBulk.classList.toggle('active',m==='bulk');singleBox.classList.toggle('hide',m!=='single');bulkBox.classList.toggle('hide',m!=='bulk');hideErr()}
 async function buscarVin(){if(busy)return;hideErr();clearRes();let vin=baseVin(vinInput.value);vinInput.value=vin;if(vin.length!==17)return showErr('El VIN debe tener mínimo 17 caracteres.');await detenerCamara();busy=true;vinActual=vin;btns(false);load(true,'Consultando resumen desde cache...','Leyendo BD_CACHE_SUM. Los detalles/fotos cargan solo si presionas los botones.');let t0=Date.now();try{let data=await jsonp({action:'admin_resumen_cache',vin},60000);if(data)data.tiempo_frontend_ms=Date.now()-t0;if(!data||data.ok!==true){showErr(data&&data.error?data.error:'La consulta no devolvió un resultado válido desde cache.');debug(data);return}renderResumen(data)}catch(e){showErr(msgErr(e))}finally{busy=false;btns(true);load(false)}}
-async function buscarMasivo(){if(busy)return;hideErr();clearRes();let vins=listVins(bulkInput.value||'');if(!vins.length)return showErr('No encontré VINs válidos de 17 caracteres en la lista.');busy=true;btns(false);let texto=vins.join('\\n');load(true,'Consultando lista desde cache...','Leyendo BD_CACHE_SUM. Las fotos no cargan en el resumen.');let t0=Date.now();try{let data=await jsonp({action:'admin_masivo_cache',vins:texto},60000);if(data)data.tiempo_frontend_ms=Date.now()-t0;if(!data||data.ok!==true){showErr(data&&data.error?data.error:'La consulta masiva no devolvió un resultado válido desde cache.');debug(data);return}renderMasivo(data)}catch(e){showErr(msgErr(e))}finally{busy=false;btns(true);load(false)}}
+async function buscarMasivo(){
+  if(busy)return;
+
+  hideErr();
+  clearRes();
+
+  let vins = listVins(bulkInput.value || '');
+
+  console.log('VINs enviados al cache:', vins);
+
+  if(!vins.length){
+    return showErr('No encontré VINs válidos de 17 caracteres en la lista.');
+  }
+
+  busy = true;
+  btns(false);
+
+  // FIX IMPORTANTE:
+  // Antes se mandaba un separador mal escapado y el backend podía interpretar una N pegada al siguiente VIN.
+  // Con coma no se mete ninguna letra rara.
+  let texto = vins.join(',');
+
+  load(
+    true,
+    'Consultando lista desde cache...',
+    'Leyendo BD_CACHE_SUM. Las fotos no cargan en el resumen.'
+  );
+
+  let t0 = Date.now();
+
+  try{
+    let data = await jsonp(
+      {
+        action:'admin_masivo_cache',
+        vins:texto
+      },
+      60000
+    );
+
+    if(data)data.tiempo_frontend_ms = Date.now() - t0;
+
+    if(!data || data.ok !== true){
+      showErr(
+        data && data.error
+          ? data.error
+          : 'La consulta masiva no devolvió un resultado válido desde cache.'
+      );
+      debug(data);
+      return;
+    }
+
+    renderMasivo(data);
+
+  }catch(e){
+    showErr(msgErr(e));
+
+  }finally{
+    busy = false;
+    btns(true);
+    load(false);
+  }
+}
 async function probarBackend(show){backendStatus.textContent='Probando cache...';if(show)load(true,'Probando cache...','Verificando conexión con BD_CACHE_SUM.');try{let data=await jsonp({action:'admin_status_cache'},60000);if(data&&data.ok){backendStatus.textContent='Cache conectado';backendStatus.style.color='#b8ffcf';debug(data)}else{backendStatus.textContent='Cache con error';backendStatus.style.color='#ffd0d0';if(show)showErr(data&&data.error?data.error:'Cache no respondió correctamente.');debug(data)}}catch(e){backendStatus.textContent='Cache falló';backendStatus.style.color='#ffd0d0';if(show)showErr(msgErr(e))}finally{if(show)load(false)}}
 
 async function cargarDetalleReprocesos(targetId){
@@ -242,5 +303,27 @@ function unirMasivoParalelo(base,repro,dealer,totalMs){base=base||{};repro=repro
 function jsonp(params,timeoutMs){return new Promise((resolve,reject)=>{let cb='__sumAdminV2Cb_'+Date.now()+'_'+Math.floor(Math.random()*1e5),s=document.createElement('script'),done=false,t=setTimeout(()=>{clean();reject(new Error('La consulta demoró demasiado. Apps Script puede estar procesando más de lo normal.'))},timeoutMs||180000);function clean(){if(done)return;done=true;clearTimeout(t);if(s.parentNode)s.parentNode.removeChild(s);try{delete window[cb]}catch(e){window[cb]=undefined}}window[cb]=d=>{clean();resolve(d)};s.onerror=()=>{clean();reject(new Error('No se pudo conectar con Apps Script. Revisa la URL /exec, permisos o despliegue.'))};let q=Object.keys(params).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(params[k]));q.push('prefix='+encodeURIComponent(cb));q.push('callback='+encodeURIComponent(cb));q.push('cb='+encodeURIComponent(cb));q.push('t='+Date.now());s.src=API_BASE+(API_BASE.includes('?')?'&':'?')+q.join('&');document.body.appendChild(s)})}
 async function alternarCamara(){camaraActiva?await detenerCamara():await iniciarCamara()}async function iniciarCamara(){hideErr();if(typeof Html5Qrcode==='undefined')return showErr('No cargó la librería del lector QR.');readerWrap.style.display='block';cameraBtn.disabled=true;cameraBtn.textContent='Abriendo cámara...';try{lectorQR=new Html5Qrcode('reader');await lectorQR.start({facingMode:'environment'},{fps:10,qrbox:(w,h)=>{let x=Math.floor(Math.min(w,h)*.7);return{width:x,height:x}},aspectRatio:1.333333},async text=>{let vin=baseVin(text);if(vin.length!==17){cameraMsg.textContent='QR leído, pero no contiene VIN válido.';return}vinInput.value=vin;cameraMsg.textContent='VIN detectado: '+vin;await detenerCamara();mode('single');buscarVin()},()=>{});camaraActiva=true;cameraBtn.disabled=false;cameraBtn.textContent='⏹ Detener cámara';cameraMsg.textContent='Coloca el QR dentro del recuadro.'}catch(e){camaraActiva=false;cameraBtn.disabled=false;cameraBtn.textContent='📷 Activar cámara';readerWrap.style.display='none';showErr('No se pudo abrir cámara: '+msgErr(e))}}
 async function detenerCamara(){try{if(lectorQR&&camaraActiva)await lectorQR.stop();if(lectorQR)try{lectorQR.clear()}catch(e){}}catch(e){}lectorQR=null;camaraActiva=false;readerWrap.style.display='none';cameraBtn.disabled=false;cameraBtn.textContent='📷 Activar cámara'}
-function load(show,t,x){if(t)loadingTitle.textContent=t;if(x)loadingText.textContent=x;loading.style.display=show?'flex':'none'}function btns(en){searchBtn.disabled=!en;bulkBtn.disabled=!en;cameraBtn.disabled=!en}function clearRes(){results.style.display='none';resultContent.innerHTML=''}function limpiarTodo(){vinInput.value='';bulkInput.value='';vinActual='';clearRes();hideErr()}function showErr(m){errorBox.textContent=m||'Error desconocido.';errorBox.style.display='block';errorBox.scrollIntoView({behavior:'smooth',block:'center'})}function hideErr(){errorBox.textContent='';errorBox.style.display='none'}function debug(o){let box=document.getElementById('debugBox');if(!box)return;if(!o){box.style.display='none';box.textContent='';return}box.style.display='block';try{box.textContent=JSON.stringify(o,null,2).slice(0,2200)}catch(e){box.textContent=String(o)}}function localErr(m){return `<div class="err" style="display:block">${esc(m||'Error')}</div>`}function kpi(v,l){return `<div class="kpi"><div class="kv">${esc(v===undefined||v===null||v===''?'—':v)}</div><div class="kl">${esc(l)}</div></div>`}function info(l,v){return `<div class="info"><div class="il">${esc(l)}</div><div class="iv">${esc(v===undefined||v===null||v===''?'No registrado':v)}</div></div>`}function photo(f){let src=f.src||f.href||'',href=f.href||f.src||'#';return `<a class="photo" href="${attr(href)}" target="_blank" rel="noopener noreferrer">${src?`<img src="${attr(src)}" alt="${attr(f.label||'Foto')}" loading="lazy" onerror="this.style.display='none'">`:''}<span>${esc(f.label||'Abrir foto')}</span></a>`}function msgErr(e){return !e?'Error desconocido.':e.message?e.message:String(e)}function norm(v){return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'').trim()}function extraer(v){let t=String(v||'').toUpperCase();try{t=decodeURIComponent(t)}catch(e){}let m=t.match(/[A-Z0-9]{17,}/);return m?norm(m[0]):norm(t)}function baseVin(v){let c=extraer(v);return c.length>=17?c.slice(0,17):c}function listVins(t){let p=String(t||'').toUpperCase().replace(/[^A-Z0-9,\n\r; \t]/g,' ').split(/[\s,;\n\r\t]+/),seen={},out=[];p.forEach(x=>{let v=baseVin(x);if(v.length!==17||seen[v])return;seen[v]=1;out.push(v)});return out}function txt(t){return String(t||'').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}function esc(v){return String(v===undefined||v===null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}function attr(v){return esc(v)}
+function load(show,t,x){if(t)loadingTitle.textContent=t;if(x)loadingText.textContent=x;loading.style.display=show?'flex':'none'}function btns(en){searchBtn.disabled=!en;bulkBtn.disabled=!en;cameraBtn.disabled=!en}function clearRes(){results.style.display='none';resultContent.innerHTML=''}function limpiarTodo(){vinInput.value='';bulkInput.value='';vinActual='';clearRes();hideErr()}function showErr(m){errorBox.textContent=m||'Error desconocido.';errorBox.style.display='block';errorBox.scrollIntoView({behavior:'smooth',block:'center'})}function hideErr(){errorBox.textContent='';errorBox.style.display='none'}function debug(o){let box=document.getElementById('debugBox');if(!box)return;if(!o){box.style.display='none';box.textContent='';return}box.style.display='block';try{box.textContent=JSON.stringify(o,null,2).slice(0,2200)}catch(e){box.textContent=String(o)}}function localErr(m){return `<div class="err" style="display:block">${esc(m||'Error')}</div>`}function kpi(v,l){return `<div class="kpi"><div class="kv">${esc(v===undefined||v===null||v===''?'—':v)}</div><div class="kl">${esc(l)}</div></div>`}function info(l,v){return `<div class="info"><div class="il">${esc(l)}</div><div class="iv">${esc(v===undefined||v===null||v===''?'No registrado':v)}</div></div>`}function photo(f){let src=f.src||f.href||'',href=f.href||f.src||'#';return `<a class="photo" href="${attr(href)}" target="_blank" rel="noopener noreferrer">${src?`<img src="${attr(src)}" alt="${attr(f.label||'Foto')}" loading="lazy" onerror="this.style.display='none'">`:''}<span>${esc(f.label||'Abrir foto')}</span></a>`}function msgErr(e){return !e?'Error desconocido.':e.message?e.message:String(e)}function norm(v){return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'').trim()}function extraer(v){let t=String(v||'').toUpperCase();try{t=decodeURIComponent(t)}catch(e){}let m=t.match(/[A-Z0-9]{17,}/);return m?norm(m[0]):norm(t)}function baseVin(v){let c=extraer(v);return c.length>=17?c.slice(0,17):c}function listVins(t){
+  let partes = String(t || '')
+    .toUpperCase()
+    .replace(/\r/g,'\n')
+    .replace(/[^A-Z0-9,\n; \t]/g,' ')
+    .split(/[\n,;\t ]+/);
+
+  let seen = {};
+  let out = [];
+
+  partes.forEach(x=>{
+    let v = baseVin(x);
+
+    if(v.length !== 17 || seen[v]){
+      return;
+    }
+
+    seen[v] = 1;
+    out.push(v);
+  });
+
+  return out;
+}function txt(t){return String(t||'').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}function esc(v){return String(v===undefined||v===null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}function attr(v){return esc(v)}
 </script></body></html>
